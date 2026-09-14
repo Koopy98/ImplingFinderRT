@@ -125,8 +125,19 @@ class ImplingFinderImpPanel extends JPanel {
                 setCursor(new Cursor(Cursor.DEFAULT_CURSOR));
             }
 
+            // Popup triggers fire on mousePressed on Windows/Linux but on
+            // mouseReleased on Mac - checking both is the standard
+            // cross-platform-safe way to catch a right-click reliably.
+            @Override
+            public void mousePressed(MouseEvent e) {
+                maybeShowPopup(e);
+            }
+
             @Override
             public void mouseReleased(MouseEvent e) {
+                if (maybeShowPopup(e))
+                    return;
+
                 plugin.addMapPoints(implingWorldPoint);
 
                 // Toggle highlight: clicking the already-selected panel clears
@@ -145,6 +156,23 @@ class ImplingFinderImpPanel extends JPanel {
                     for (JPanel p : panels)
                         matchComponentBackground(p, ColorScheme.DARK_GRAY_HOVER_COLOR.brighter());
                 }
+            }
+
+            // Right-click "Hop to World" - a separate interaction from the
+            // existing left-click (scroll map to impling) and doesn't
+            // conflict with it, since RuneLite's own world hopper handles
+            // double-click for its own panel and this panel already uses
+            // single-click for something else.
+            private boolean maybeShowPopup(MouseEvent e) {
+                if (!e.isPopupTrigger())
+                    return false;
+
+                JPopupMenu popup = new JPopupMenu();
+                JMenuItem hopItem = new JMenuItem("Hop to World " + data.getWorld());
+                hopItem.addActionListener(actionEvent -> plugin.hopToWorld(data.getWorld()));
+                popup.add(hopItem);
+                popup.show(e.getComponent(), e.getX(), e.getY());
+                return true;
             }
         };
 
