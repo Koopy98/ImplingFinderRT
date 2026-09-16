@@ -1,11 +1,9 @@
 package com.hablapatabla.implingfinder;
 
 import com.google.gson.*;
-import com.google.gson.annotations.SerializedName;
 import com.google.gson.reflect.TypeToken;
 import com.hablapatabla.implingfinder.model.ImplingFinderData;
 import com.hablapatabla.implingfinder.model.ImplingFinderEnum;
-import lombok.Value;
 import okhttp3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,9 +16,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Future;
-import java.util.function.Function;
 
 
 @Singleton
@@ -44,12 +39,12 @@ public class ImplingFinderWebManager {
     private Logger logger = LoggerFactory.getLogger(ImplingFinderWebManager.class);
 
 
-    // Oracle's schema only accepts these 5 original types (confirmed via HTTP 400 on
-    // everything else). Sending the newly-tracked 7 types to Oracle would just waste one
-    // of its severely limited (3-6 total) concurrent connection slots on a guaranteed
-    // rejection — so those are filtered out of the Oracle POST specifically. They still
-    // go to Supabase for anyone with dual-write enabled, since Supabase accepts all 12.
-    private static boolean isOracleCompatible(int npcid) {
+    // The fallback project only ever carries these 5 types - Magpie, Ninja,
+    // Dragon, Lucky, Crystal. Same set as before (this used to gate what
+    // went to Oracle), kept identical on purpose: it's still the right
+    // subset - rare/high-value enough to be worth a backup copy, small
+    // enough that a free-tier project stays nowhere near its own limits.
+    private static boolean isFallbackCompatible(int npcid) {
         switch (npcid) {
             case 1642: case 1652: // Magpie
             case 1643: case 1653: // Ninja
@@ -70,14 +65,14 @@ public class ImplingFinderWebManager {
             for (ImplingFinderData data : toUpload) {
                 String json = getGson().toJson(data);
 
-                // Supabase is now the primary write target for everyone, for all 12
-                // types. Oracle is only ever written to as a fallback, and only if
-                // the Supabase write actually fails - not as a parallel write like
-                // the old dual-write testing setup. Oracle's own schema still only
-                // accepts the original 5 types (a hard CHECK constraint on their
-                // end, not something this plugin can work around), so the other 7
-                // simply have no fallback destination during a Supabase outage -
-                // a known, accepted gap rather than a silent one.
+                // Supabase is the primary write target for everyone, for all 12
+                // types. The fallback project is written to unconditionally and in
+                // parallel for the 5 compatible types (not only when the primary
+                // write fails) - continuous real traffic is what keeps that
+                // project's free tier from auto-pausing, and it means the fallback
+                // is never stale if it's ever actually needed. The other 7 types
+                // still have no fallback destination during a Supabase outage - a
+                // known, accepted gap rather than a silent one.
                 Request supabaseRequest = new Request.Builder()
                         .url(ImplingFinderPlugin.implingSupabasePostEndpoint)
                         .addHeader(CONTENT, JSON)
@@ -90,16 +85,14 @@ public class ImplingFinderWebManager {
                 okHttpClient.newCall(supabaseRequest).enqueue(new Callback() {
                     @Override
                     public void onFailure(Call call, IOException e) {
-                        logger.error("Supabase write failed, falling back to Oracle", e);
-                        writeToOracleFallback(data, json);
+                        logger.error("Supabase write failed", e);
                     }
 
                     @Override
                     public void onResponse(Call call, Response response) throws IOException {
                         try {
                             if (!response.isSuccessful()) {
-                                logger.error("Supabase write unsuccessful (" + response.code() + "), falling back to Oracle");
-                                writeToOracleFallback(data, json);
+                                logger.error("Supabase write unsuccessful (" + response.code() + ")");
                             }
                         }
                         catch (Exception e) {
@@ -110,6 +103,10 @@ public class ImplingFinderWebManager {
                         }
                     }
                 });
+
+                if (isFallbackCompatible(data.getNpcid())) {
+                    writeToFallbackSupabase(json);
+                }
             }
         } catch (Exception e) {
             logger.error("Outer catch block POST ", e);
@@ -118,36 +115,37 @@ public class ImplingFinderWebManager {
     }
 
     /**
-     * Oracle fallback write, only triggered when the primary Supabase write
-     * fails. Only attempted for the 5 types Oracle's own schema actually
-     * accepts (see isOracleCompatible) - attempting the other 7 would just
-     * waste a request on a guaranteed rejection.
+     * Unconditional dual-write to the fallback Supabase project, for the 5
+     * compatible types only (see isFallbackCompatible). Fires alongside the
+     * primary write every time, not just on failure - this is what keeps
+     * the fallback project's own free tier from auto-pausing on inactivity,
+     * and means it's already warm and current if it's ever actually needed
+     * for a read.
      */
-    private void writeToOracleFallback(ImplingFinderData data, String json) {
-        if (!isOracleCompatible(data.getNpcid())) {
-            return;
-        }
-
-        Request oracleRequest = new Request.Builder()
-                .url(ImplingFinderPlugin.implingPostEndpoint)
+    private void writeToFallbackSupabase(String json) {
+        Request fallbackRequest = new Request.Builder()
+                .url(ImplingFinderPlugin.implingFallbackPostEndpoint)
                 .addHeader(CONTENT, JSON)
+                .addHeader("apikey", ImplingFinderPlugin.FALLBACK_SUPABASE_ANON_KEY)
+                .addHeader("Authorization", "Bearer " + ImplingFinderPlugin.FALLBACK_SUPABASE_ANON_KEY)
+                .addHeader("Prefer", "return=minimal")
                 .post(RequestBody.create(JSONTYPE, json))
                 .build();
 
-        okHttpClient.newCall(oracleRequest).enqueue(new Callback() {
+        okHttpClient.newCall(fallbackRequest).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                logger.error("Oracle fallback write also failed", e);
+                logger.error("Fallback Supabase write failed", e);
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 try {
                     if (!response.isSuccessful())
-                        logger.error("Oracle fallback write unsuccessful");
+                        logger.error("Fallback Supabase write unsuccessful (" + response.code() + ")");
                 }
                 catch (Exception e) {
-                    logger.error("Error handling Oracle fallback response", e);
+                    logger.error("Error handling fallback Supabase write response", e);
                 }
                 finally {
                     response.close();
@@ -160,13 +158,14 @@ public class ImplingFinderWebManager {
         boolean wantsAny = ids.contains(ImplingFinderPlugin.RECENT_IMPLINGS_ID);
         List<ImplingFinderData> implings;
 
-        // Supabase is now the primary read source for everyone, for all 12
-        // types. Oracle is only queried as a fallback, and only if the
-        // Supabase read genuinely fails (network/HTTP error) - an empty
-        // result from Supabase is not a failure, it just means nothing's
-        // been found recently, and does not trigger a fallback.
+        // Supabase is the primary read source for everyone, for all 12
+        // types. The fallback project is only queried if the primary read
+        // genuinely fails (network/HTTP error) - an empty result is not a
+        // failure, it just means nothing's been found recently, and does
+        // not trigger a fallback. The fallback only ever has the 5
+        // compatible types anyway, since that's all it's ever written.
         try {
-            List<ImplingFinderData> supabaseResults = fetchSupabaseRecent();
+            List<ImplingFinderData> supabaseResults = fetchRecent(ImplingFinderPlugin.implingSupabaseGetEndpoint, ImplingFinderPlugin.SUPABASE_ANON_KEY);
             implings = new ArrayList<>();
             for (ImplingFinderData data : supabaseResults) {
                 if (wantsAny || ids.contains(data.getNpcid())) {
@@ -174,8 +173,18 @@ public class ImplingFinderWebManager {
                 }
             }
         } catch (Exception e) {
-            logger.error("Supabase read failed, falling back to Oracle", e);
-            implings = getDataFromOracle(ids);
+            logger.error("Supabase read failed, falling back to backup Supabase project", e);
+            implings = new ArrayList<>();
+            try {
+                List<ImplingFinderData> fallbackResults = fetchRecent(ImplingFinderPlugin.implingFallbackGetEndpoint, ImplingFinderPlugin.FALLBACK_SUPABASE_ANON_KEY);
+                for (ImplingFinderData data : fallbackResults) {
+                    if (wantsAny || ids.contains(data.getNpcid())) {
+                        implings.add(data);
+                    }
+                }
+            } catch (Exception fallbackException) {
+                logger.error("Fallback Supabase read also failed", fallbackException);
+            }
         }
 
         Collections.sort(implings, Collections.reverseOrder());
@@ -185,56 +194,24 @@ public class ImplingFinderWebManager {
     }
 
     /**
-     * Oracle fallback read, only used when the primary Supabase read fails
-     * outright. Same logic the plugin always used before Supabase became
-     * primary - separate per-type endpoints, or the "any" endpoint for
-     * Recent. Only ever returns the 5 types Oracle's schema supports.
-     */
-    private List<ImplingFinderData> getDataFromOracle(List<Integer> ids) {
-        List<Future<ImplingsWrapper>> futures = new ArrayList<>();
-        List<ImplingFinderData> implings = new ArrayList<>();
-
-        for (Integer id : ids) {
-            String endpoint;
-            if (id != ImplingFinderPlugin.RECENT_IMPLINGS_ID)
-                endpoint = ImplingFinderPlugin.implingGetIdEndpoint + Integer.toString(id);
-            else
-                endpoint = ImplingFinderPlugin.implingGetAnyEndpoint;
-
-            futures.add(fetchAndDeserializeSpecificImpling(endpoint, getGson(), new TypeToken<ImplingsWrapper>() {}));
-        }
-
-        try {
-            for (Future<ImplingsWrapper> f : futures) {
-                implings.addAll(f.get().implings);
-            }
-        }
-        catch (Exception e) {
-            logger.error("Error opening Oracle fallback futures", e);
-        }
-
-        return implings;
-    }
-
-    /**
-     * Fetches the current contents of Supabase's implings_recent view - a
+     * Fetches the current contents of an implings_recent view - a
      * restricted, read-only view that only ever exposes sightings from the
-     * last 10 minutes (see the migration that created it). The anon key has
-     * no read access to the raw implings table itself, only this view.
-     * Unlike Oracle's ORDS response ({"items": [...]}), PostgREST returns a
-     * bare JSON array directly, so this needs its own deserialization path
-     * rather than reusing ImplingsWrapper.
+     * last 10 minutes. Used for both the primary and fallback Supabase
+     * projects, since they're both PostgREST and both expose the same
+     * bare-JSON-array shape - the only difference is which URL/key gets
+     * passed in. Neither anon key has read access to its own raw implings
+     * table, only this view.
      */
-    private List<ImplingFinderData> fetchSupabaseRecent() throws Exception {
+    private List<ImplingFinderData> fetchRecent(String endpoint, String apiKey) throws Exception {
         Request request = new Request.Builder()
-                .url(ImplingFinderPlugin.implingSupabaseGetEndpoint + "?select=*")
-                .addHeader("apikey", ImplingFinderPlugin.SUPABASE_ANON_KEY)
-                .addHeader("Authorization", "Bearer " + ImplingFinderPlugin.SUPABASE_ANON_KEY)
+                .url(endpoint + "?select=*")
+                .addHeader("apikey", apiKey)
+                .addHeader("Authorization", "Bearer " + apiKey)
                 .build();
 
         try (Response response = okHttpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                logger.error("Supabase dual-read request unsuccessful: " + response.code());
+                logger.error("Recent-implings request unsuccessful: " + response.code());
                 return Collections.emptyList();
             }
             String body = response.body().string();
@@ -244,61 +221,6 @@ public class ImplingFinderWebManager {
         }
     }
 
-
-    /**
-     * Calls getSpecificImplingResponseAsync in order to get a CompletableFuture containing the
-     * full response body from the api at url. Uses a TypeToken to deserialize body, see
-     * ImplingsWrapper for only use case. Oracle api response is a full JSON array, with
-     * impling data of interest in a JSON object called items.
-     */
-    private <T> Future<T> fetchAndDeserializeSpecificImpling(String url, Gson gson, TypeToken<T> typeToken) {
-        CompletableFuture<String> future = getSpecificImplingResponseAsync(url);
-        return future.thenApply(new Function<String, T>() {
-            public T apply (String body) {
-                return gson.fromJson(body, typeToken.getType());
-            }
-        });
-    }
-
-
-    private CompletableFuture<String> getSpecificImplingResponseAsync(String url) {
-        CompletableFuture<String> future = new CompletableFuture<>();
-        Request r = new Request.Builder()
-                .url(url)
-                .build();
-
-        okHttpClient.newCall(r).enqueue(new Callback() {
-            @Override
-            public void onFailure(Call call, IOException e) {
-                future.completeExceptionally(e);
-            }
-
-            @Override
-            public void onResponse(Call call, Response response) throws IOException {
-                try {
-                    if (response.isSuccessful()) {
-                        future.complete(response.body().string());
-                    }
-                    else {
-                        throw new IOException("Http error");
-                    }
-                }
-                catch (Exception e) {
-                    future.completeExceptionally(e);
-                }
-                finally {
-                    response.close();
-                }
-            }
-        });
-        return future;
-    }
-
-    @Value
-    private static class ImplingsWrapper {
-        @SerializedName("items")
-        List<ImplingFinderData> implings;
-    }
 
     private Gson getGson() {
         return gsonBuilder.registerTypeAdapter(Instant.class, new InstantSecondsConverter()).create();

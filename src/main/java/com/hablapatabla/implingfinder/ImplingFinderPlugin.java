@@ -96,13 +96,19 @@ public class ImplingFinderPlugin extends Plugin {
     @Setter(AccessLevel.PACKAGE)
     private List<ImplingFinderData> remotelyFetchedImplings = new ArrayList<>();
 
-    protected static String implingGetAnyEndpoint = "https://puos0bfgxc2lno5-implingdb.adb.us-phoenix-1.oraclecloudapps.com/ords/impling/implingdev/dev";
-
-    protected static String implingGetIdEndpoint = "https://puos0bfgxc2lno5-implingdb.adb.us-phoenix-1.oraclecloudapps.com/ords/impling/implingdev/dev/";
-
-    protected static String implingPostEndpoint = "https://puos0bfgxc2lno5-implingdb.adb.us-phoenix-1.oraclecloudapps.com/ords/impling/implingdev/dev";
-
     public static final int RECENT_IMPLINGS_ID = -1;
+
+    // Fallback Supabase project - a separate, independent project (own quota,
+    // own org account) used only for the 5 highest-value types: Magpie,
+    // Ninja, Dragon, Lucky, Crystal (see isFallbackCompatible). These 5 are
+    // ALWAYS dual-written here on every sighting, not just when the primary
+    // write fails - continuous light traffic is what keeps this project's
+    // free-tier instance from auto-pausing after 7 days idle, rather than a
+    // separate keepalive job. Reads only ever hit this project as a
+    // fallback, when the primary Supabase read fails outright.
+    public static final String FALLBACK_SUPABASE_ANON_KEY = "sb_publishable_tuMJFjFAs1YfmtD8fM_mJA_bo7WtRPL";
+    public static String implingFallbackPostEndpoint = "https://bpumxzxexxhelnahlcfk.supabase.co/rest/v1/implings";
+    public static String implingFallbackGetEndpoint = "https://bpumxzxexxhelnahlcfk.supabase.co/rest/v1/implings_recent";
 
     // Supabase endpoint and INSERT-only anon key for dual-write load testing.
     // The anon key has no SELECT policy — it can only INSERT data, meaning
@@ -110,13 +116,14 @@ public class ImplingFinderPlugin extends Plugin {
     // Dual-write is controlled by the "Enable Dual Write" config toggle and
     // is OFF by default so existing behaviour is completely unchanged until
     // Hablapatabla explicitly enables it for testing.
-    public static final String SUPABASE_ANON_KEY = "sb_publishable_QOqhhjOdUFAVKDX6x0jmaA__-PwdpKM";
+    public static final String SUPABASE_ANON_KEY = "sb_publishable_QPK-l1a9QAakMIHPrCDCQQ_sY-quMIT";
     public static String implingSupabasePostEndpoint = "https://zoorgufqkavyngfhucgc.supabase.co/rest/v1/implings";
     // Reads go against the restricted view, not the raw table - it only ever
     // returns sightings from the last 10 minutes (matching the existing
     // auto-delete window), so polling it faster than that gets no additional
     // data. The anon key still has no SELECT grant on the raw table itself.
-    public static String implingSupabaseGetEndpoint = "https://zoorgufqkavyngfhucgc.supabase.co/rest/v1/implings_recent";
+    // Reads go through this Edge Function.
+    public static String implingSupabaseGetEndpoint = "https://zoorgufqkavyngfhucgc.supabase.co/functions/v1/get-implings";
 
     // Puro-Puro minigame area bounds (OSRS world coordinates).
     // Used to filter Puro-Puro sightings out of the results list when
