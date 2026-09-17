@@ -12,7 +12,6 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.NPC;
-import net.runelite.api.World;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.NpcSpawned;
@@ -20,12 +19,8 @@ import net.runelite.client.Notifier;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
-import net.runelite.client.game.WorldService;
-import net.runelite.client.util.WorldUtil;
-import net.runelite.http.api.worlds.WorldResult;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.ItemManager;
-import net.runelite.client.game.WorldService;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.task.Schedule;
@@ -65,9 +60,6 @@ public class ImplingFinderPlugin extends Plugin {
 
     @Inject
     private Client client;
-
-    @Inject
-    private WorldService worldService;
 
     @Inject
     private Gson gson;
@@ -252,62 +244,6 @@ public class ImplingFinderPlugin extends Plugin {
 
     public BufferedImage getWorldMapImage() {
         return ImageUtil.loadImageResource(getClass(), "/icon.png");
-    }
-
-    // Requested by a Discord user: right-click "Hop to World" on an impling
-    // row. Uses WorldService (fetches a fresh world list itself) rather
-    // than client.getWorldList(), which could return null and was crashing
-    // this method with an uncaught NullPointerException.
-    //
-    // WorldResult.findWorld() returns a net.runelite.http.api.worlds.World
-    // (a plain data object from RuneLite's own world-list API) - this is a
-    // DIFFERENT class than net.runelite.api.World that client.hopToWorld()
-    // actually needs, despite the identical class name. This exact
-    // conversion (create a blank api.World via client.createWorld(), then
-    // copy each field across, using WorldUtil.toWorldTypes() for the world
-    // type flags specifically) matches RuneLite's own core
-    // DefaultWorldPlugin implementation verbatim.
-    // Requested by a Discord user: right-click "Hop to World" on an impling
-    // row. Uses WorldService (fetches a fresh world list itself) rather
-    // than client.getWorldList(), which could return null.
-    //
-    // WorldResult.findWorld() returns a net.runelite.http.api.worlds.World
-    // (a plain data object from RuneLite's own world-list API) - this is a
-    // DIFFERENT class than net.runelite.api.World that client.hopToWorld()
-    // actually needs, despite the identical class name. This exact
-    // conversion (create a blank api.World via client.createWorld(), then
-    // copy each field across, using WorldUtil.toWorldTypes() for the world
-    // type flags specifically) matches RuneLite's own core
-    // DefaultWorldPlugin implementation verbatim.
-    //
-    // openWorldHopper() must be called before hopToWorld() - without it,
-    // hopToWorld() silently completes without throwing but doesn't
-    // actually perform the hop, since the World Switcher interface needs
-    // to be loaded first.
-    public void hopToWorld(int worldNumber) {
-        clientThread.invoke(() -> {
-            WorldResult worldResult = worldService.getWorlds();
-            if (worldResult == null) {
-                logger.error("Could not fetch world list to hop to world {}", worldNumber);
-                return;
-            }
-            net.runelite.http.api.worlds.World httpWorld = worldResult.findWorld(worldNumber);
-            if (httpWorld == null) {
-                logger.error("Could not find world {} to hop to", worldNumber);
-                return;
-            }
-
-            World rsWorld = client.createWorld();
-            rsWorld.setActivity(httpWorld.getActivity());
-            rsWorld.setAddress(httpWorld.getAddress());
-            rsWorld.setId(httpWorld.getId());
-            rsWorld.setPlayerCount(httpWorld.getPlayers());
-            rsWorld.setLocation(httpWorld.getLocation());
-            rsWorld.setTypes(WorldUtil.toWorldTypes(httpWorld.getTypes()));
-
-            client.openWorldHopper();
-            client.hopToWorld(rsWorld);
-        });
     }
 
     public void addMapPoints(WorldPoint... points) {
