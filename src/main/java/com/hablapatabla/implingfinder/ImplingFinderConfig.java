@@ -72,6 +72,16 @@ public interface ImplingFinderConfig extends Config
     {
         return "https://discord.gg/4cuFQGvDk2";
     }
+    @ConfigItem(
+            keyName = "donate",
+            position = 9,
+            name = "Support the project",
+            description = "If you enjoy the plugin, consider donating - running the backend isn't free. This never unlocks any feature, it's just a thanks."
+    )
+    default String donate()
+    {
+        return "https://ko-fi.com/koopyosrs";
+    }
 
     @ConfigSection(
             name = "Filter Locations",

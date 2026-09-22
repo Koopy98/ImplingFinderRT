@@ -177,6 +177,23 @@ public class ImplingFinderPanel extends PluginPanel {
             implingSelections.add(p);
         fetchPanel.add(implingSelections, BorderLayout.NORTH);
 
+        JLabel donateLabel = new JLabel("Enjoying the plugin? Consider supporting it \u2764");
+        donateLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        donateLabel.setFont(donateLabel.getFont().deriveFont(11f));
+        donateLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        donateLabel.setBorder(new EmptyBorder(4, 0, 4, 0));
+        donateLabel.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        donateLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                try {
+                    Desktop.getDesktop().browse(new java.net.URI("https://ko-fi.com/koopyosrs"));
+                } catch (Exception ex) {
+                    logger.error("Could not open donation link", ex);
+                }
+            }
+        });
+
         JButton fetchButton = new JButton("Fetch");
         fetchButton.addActionListener(new ActionListener() {
             @Override
@@ -186,7 +203,12 @@ public class ImplingFinderPanel extends PluginPanel {
         });
         fetchButton.setForeground(Color.WHITE);
         fetchButton.setRequestFocusEnabled(false);
-        fetchPanel.add(fetchButton, BorderLayout.SOUTH);
+
+        JPanel fetchBottomPanel = new JPanel();
+        fetchBottomPanel.setLayout(new BoxLayout(fetchBottomPanel, BoxLayout.Y_AXIS));
+        fetchBottomPanel.add(donateLabel);
+        fetchBottomPanel.add(fetchButton);
+        fetchPanel.add(fetchBottomPanel, BorderLayout.SOUTH);
 
         topContainer.add(fetchPanel, BorderLayout.SOUTH);
 
