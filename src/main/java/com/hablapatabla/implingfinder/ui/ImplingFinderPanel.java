@@ -11,6 +11,7 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.ui.components.PluginErrorPanel;
+import net.runelite.client.util.LinkBrowser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -186,11 +187,7 @@ public class ImplingFinderPanel extends PluginPanel {
         donateLabel.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(java.awt.event.MouseEvent e) {
-                try {
-                    Desktop.getDesktop().browse(new java.net.URI("https://ko-fi.com/koopyosrs"));
-                } catch (Exception ex) {
-                    logger.error("Could not open donation link", ex);
-                }
+                LinkBrowser.browse("https://ko-fi.com/koopyosrs");
             }
         });
 
