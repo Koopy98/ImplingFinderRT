@@ -208,7 +208,7 @@ public class ImplingFinderPlugin extends Plugin {
         if (npc.getName() == null)
             return;
 
-        if (!isImpling(npc.getName()))
+        if (!isImpling(npc.getId()))
             return;
 
         if (wantSpawnNotifications)
@@ -219,10 +219,15 @@ public class ImplingFinderPlugin extends Plugin {
         implingsToUpload.add(imp);
     }
 
-    private boolean isImpling(String name) {
-        return ImplingFinderEnum.getIdByNameStrict(name) != RECENT_IMPLINGS_ID;
-    }
-
+    // Classification now goes strictly by the NPC's real, authoritative ID
+    // (via ImplingFinderEnum.findById), never by matching text in its name.
+    // The old name-based isImpling(String)/getIdByNameStrict path was
+    // silently misclassifying any NPC whose name happened to contain a
+    // phrase like "Dragon impling" - using that type's hardcoded ID
+    // regardless of what the NPC's real ID actually was. This surfaced
+    // badly after a game update introduced an unrelated NPC that collided
+    // with this name-matching logic (see the October 2026 false-positive
+    // incident across Dragon/Lucky/Crystal/Ninja/Magpie).
     private boolean isImpling(int id) {
         return ImplingFinderEnum.findById(id) != null;
     }
@@ -232,7 +237,7 @@ public class ImplingFinderPlugin extends Plugin {
         WorldArea area = n.getWorldArea();
         WorldPoint point = area.toWorldPoint();
         return ImplingFinderData.builder()
-                                    .npcid(ImplingFinderEnum.getIdByNameStrict(n.getName()))
+                                    .npcid(n.getId())
                                     .world(world)
                                     .xcoord(point.getX())
                                     .ycoord(point.getY())
